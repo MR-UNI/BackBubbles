@@ -358,11 +358,15 @@ class GMessagesClient:
         )
         await page.goto(_URL_AUTH, wait_until="domcontentloaded")
 
-        # Wait until the app redirects away from the auth page, which happens
-        # automatically once the phone acknowledges the pairing.
+        # Wait until the app fully redirects to the conversations view.  Google
+        # routes through intermediate pages (e.g. accounts.google.com SetSID,
+        # messages.google.com/web/u/0/postSignIn) before landing on the home
+        # URL, so waiting only for "authentication" to leave the URL is not
+        # sufficient — the selector wait that follows would time out while the
+        # page is still mid-redirect.
         try:
             await page.wait_for_url(
-                lambda url: "authentication" not in url,
+                lambda url: "/conversations" in url,
                 timeout=_PAIR_TIMEOUT_MS,
             )
         except PlaywrightTimeoutError:
@@ -511,7 +515,11 @@ class GMessagesClient:
                 log.debug("Inbox poll timed out — will retry next cycle")
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                # If the page/context has been closed, stop the poller so the
+                # main task can tear down cleanly instead of spinning forever.
+                if "closed" in str(exc).lower() or "TargetClosed" in type(exc).__name__:
+                    raise
                 log.exception("Unexpected error in inbox poller")
 
     async def _check_inbox(self, page: Page) -> None:
