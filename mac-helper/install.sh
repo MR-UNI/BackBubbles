@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# BackBubbles Mac Helper — installer
+#
+# Creates a Python virtual-env, installs Playwright + Chromium + rumps,
+# writes a LaunchAgent plist so the menu bar app auto-starts at login,
+# and loads it.
+#
+# Usage:
+#   bash install.sh
+#
+# Optional variables:
+#   BB_GMESSAGES_PROFILE_DIR   (default: ~/.backbubbles/gmessages-profile)
+#   BB_GMESSAGES_POLL_INTERVAL (default: 3.0)
+#   BB_POLL_INTERVAL           (default: 2.0)
+#
+# After installing, use the "Pair Phone…" item in the menu bar app, or run:
+#   source .venv/bin/activate && python gui.py --pair
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="${SCRIPT_DIR}/.venv"
+LABEL="com.backbubbles.helper"
+PLIST_TEMPLATE="${SCRIPT_DIR}/${LABEL}.plist"
+LAUNCH_AGENTS_DIR="${HOME}/Library/LaunchAgents"
+PLIST_DEST="${LAUNCH_AGENTS_DIR}/${LABEL}.plist"
+LOG_DIR="${HOME}/Library/Logs/BackBubbles"
+
+PROFILE_DIR="${BB_GMESSAGES_PROFILE_DIR:-${HOME}/.backbubbles/gmessages-profile}"
+POLL_INTERVAL="${BB_POLL_INTERVAL:-2.0}"
+GMESSAGES_POLL_INTERVAL="${BB_GMESSAGES_POLL_INTERVAL:-3.0}"
+
+# ---------------------------------------------------------------------------
+# Python venv + dependencies
+# ---------------------------------------------------------------------------
+echo "→ Creating Python virtual environment in ${VENV_DIR} …"
+python3 -m venv "${VENV_DIR}"
+"${VENV_DIR}/bin/pip" install --quiet --upgrade pip
+"${VENV_DIR}/bin/pip" install --quiet -r "${SCRIPT_DIR}/requirements.txt"
+echo "  ✓ Python dependencies installed (playwright, rumps)."
+
+# ---------------------------------------------------------------------------
+# Playwright browser
+# ---------------------------------------------------------------------------
+echo "→ Installing Playwright Chromium browser …"
+"${VENV_DIR}/bin/playwright" install chromium
+echo "  ✓ Chromium installed."
+
+# ---------------------------------------------------------------------------
+# Log directory
+# ---------------------------------------------------------------------------
+mkdir -p "${LOG_DIR}"
+
+# ---------------------------------------------------------------------------
+# Write LaunchAgent plist
+# ---------------------------------------------------------------------------
+mkdir -p "${LAUNCH_AGENTS_DIR}"
+sed \
+    -e "s|VENV_PYTHON_PLACEHOLDER|${VENV_DIR}/bin/python3|g" \
+    -e "s|GUI_PY_PLACEHOLDER|${SCRIPT_DIR}/gui.py|g" \
+    -e "s|GMESSAGES_PROFILE_DIR_PLACEHOLDER|${PROFILE_DIR}|g" \
+    -e "s|LOG_DIR_PLACEHOLDER|${LOG_DIR}|g" \
+    "${PLIST_TEMPLATE}" > "${PLIST_DEST}"
+
+# Patch optional env vars directly via PlistBuddy.
+/usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:BB_POLL_INTERVAL ${POLL_INTERVAL}" "${PLIST_DEST}"
+/usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:BB_GMESSAGES_POLL_INTERVAL ${GMESSAGES_POLL_INTERVAL}" "${PLIST_DEST}"
+
+echo "  ✓ LaunchAgent plist written to ${PLIST_DEST}"
+
+# ---------------------------------------------------------------------------
+# Load (or reload) the LaunchAgent
+# ---------------------------------------------------------------------------
+if launchctl list "${LABEL}" &>/dev/null; then
+    echo "→ Reloading existing LaunchAgent …"
+    launchctl unload "${PLIST_DEST}" 2>/dev/null || true
+fi
+
+launchctl load "${PLIST_DEST}"
+echo "  ✓ LaunchAgent loaded — BackBubbles will start at login."
+echo ""
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║  NEXT STEP: Pair your phone with Google Messages for Web     ║"
+echo "║                                                              ║"
+echo "║  A menu bar icon (💬) will appear when the app starts.      ║"
+echo "║  Click it and choose 'Pair Phone…' to scan the QR code,     ║"
+echo "║  or run the pairing manually:                                ║"
+echo "║                                                              ║"
+echo "║    cd ${SCRIPT_DIR}"
+echo "║    source .venv/bin/activate"
+echo "║    python gui.py --pair                                      ║"
+echo "║                                                              ║"
+echo "║  Scan the QR code in Google Messages on your Android phone.  ║"
+echo "║  After pairing, the icon turns 💬 and the relay is active.  ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo ""
+echo "Logs: ${LOG_DIR}/backbubbles.log"
+echo "      ${LOG_DIR}/backbubbles.error.log"
+echo ""
+echo "To stop:    launchctl unload ${PLIST_DEST}"
+echo "To restart: launchctl unload ${PLIST_DEST} && launchctl load ${PLIST_DEST}"
+echo "To re-pair: click 'Pair Phone…' in the menu bar, or run:"
+echo "            source ${VENV_DIR}/bin/activate && python ${SCRIPT_DIR}/gui.py --pair"
