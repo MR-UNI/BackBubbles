@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Label must match the filename (without .plist). -->
+    <key>Label</key>
+    <string>com.backbubbles.helper</string>
+
+    <!-- Full path to the Python interpreter inside the venv created by install.sh. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>VENV_PYTHON_PLACEHOLDER</string>
+        <string>MAIN_PY_PLACEHOLDER</string>
+    </array>
+
+    <!-- Environment variables read by config.py. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>BB_ANDROID_HOST</key>
+        <string>ANDROID_HOST_PLACEHOLDER</string>
+        <key>BB_ANDROID_PORT</key>
+        <string>8765</string>
+        <key>BB_POLL_INTERVAL</key>
+        <string>2.0</string>
+        <key>BB_RECONNECT_DELAY</key>
+        <string>5.0</string>
+    </dict>
+
+    <!-- Start at login and restart if it crashes. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Log output for troubleshooting. -->
+    <key>StandardOutPath</key>
+    <string>LOG_DIR_PLACEHOLDER/backbubbles.log</string>
+    <key>StandardErrorPath</key>
+    <string>LOG_DIR_PLACEHOLDER/backbubbles.error.log</string>
+</dict>
+</plist>
