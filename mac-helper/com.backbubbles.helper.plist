@@ -11,7 +11,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>VENV_PYTHON_PLACEHOLDER</string>
-        <string>MAIN_PY_PLACEHOLDER</string>
+        <string>GUI_PY_PLACEHOLDER</string>
     </array>
 
     <!-- Environment variables read by config.py. -->

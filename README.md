@@ -8,6 +8,10 @@ headless Chromium browser.  Incoming SMS/RCS messages are detected from the
 same session and injected back into Messages.app so everything appears in one
 place.
 
+A **macOS menu bar app** (`gui.py`) provides a native interface for controlling
+the relay, watching live activity, triggering pairing, and opening logs — all
+from the 💬 / ⏸ icon in the menu bar.
+
 ---
 
 ## Architecture
@@ -19,11 +23,11 @@ place.
 │  Messages.app                                    │
 │      │  (write outgoing green bubble)            │
 │      ▼                                           │
-│  chat.db  ──── SQLite poll ────► main.py         │
-│                                     │            │
-│  db_injector.py ◄── delivery ───────┤            │
-│  (inject incoming / mark delivered) │            │
-│                                     ▼            │
+│  chat.db  ──── SQLite poll ────► gui.py          │
+│                                  (menu bar app)  │
+│  db_injector.py ◄── delivery ───── │             │
+│  (inject incoming / mark delivered)│             │
+│                                    ▼             │
 │                             gmessages_client.py  │
 │                             (Playwright/Chromium) │
 └─────────────────────────────────────────────────┘
@@ -83,9 +87,9 @@ bash install.sh
 
 This will:
 - Create a Python virtual environment in `mac-helper/.venv`
-- Install Playwright and download Chromium
+- Install Playwright, Chromium, and **rumps** (the menu bar library)
 - Write a **LaunchAgent** plist to `~/Library/LaunchAgents/com.backbubbles.helper.plist`
-- Load the agent so it starts automatically at login
+- Load the agent so the menu bar app starts automatically at login
 
 **Optional environment variables for `install.sh`:**
 
@@ -97,22 +101,28 @@ This will:
 
 ### 2 — Pair your phone (first-time setup)
 
-```bash
-cd mac-helper
-source .venv/bin/activate
-python main.py --pair
-```
+After the menu bar app starts, a **⏸** (stopped) or **💬** (running) icon appears in the menu bar.
 
-A **Chromium window** will open and navigate to the Google Messages for Web
-authentication page.  On your Android phone:
+Click the icon and choose **🔗 Pair Phone…**.  A Chromium window opens and
+navigates to the Google Messages for Web authentication page.  On your Android
+phone:
 
 1. Open **Google Messages**.
 2. Tap the three-dot menu → **Device pairing** (or **Messages for web**).
 3. Tap **QR code scanner** and scan the code on screen.
 
-Once paired, the Chromium window closes automatically and the session is
-saved to `~/.backbubbles/gmessages-profile/`.  All future runs use this
-saved session in **headless** (invisible) mode.
+Once paired, the Chromium window closes, the session is saved to
+`~/.backbubbles/gmessages-profile/`, and the icon turns **●** (running) in
+the menu.  All future launches use this saved session headlessly — no QR
+code needed.
+
+You can also pair from the command line:
+
+```bash
+cd mac-helper
+source .venv/bin/activate
+python gui.py --pair
+```
 
 ### 3 — Send a test message
 
@@ -133,6 +143,20 @@ messages from that contact.
 
 ---
 
+## Menu bar controls
+
+| Item | Action |
+|------|--------|
+| ● Running / ⏸ Stopped | Current daemon status (not clickable) |
+| ▶ Start | Start the relay (when stopped) |
+| ⏹ Stop | Stop the relay (when running) |
+| 🔗 Pair Phone… | Stop, open headed Chromium for QR scan, then resume |
+| Recent Activity | Last 5 log lines from the daemon |
+| Open Logs… | Reveal the log folder in Finder |
+| Quit BackBubbles | Gracefully stop the relay and exit |
+
+---
+
 ## Reconnecting / re-pairing
 
 Google Messages for Web sessions can expire if:
@@ -140,27 +164,22 @@ Google Messages for Web sessions can expire if:
 - You sign out of Google on your phone
 - The session cookie expires after a long period of inactivity
 
-To re-pair:
+To re-pair, click **🔗 Pair Phone…** in the menu bar, or run:
 
 ```bash
 cd mac-helper
 source .venv/bin/activate
-python main.py --pair
+python gui.py --pair
 ```
 
-After scanning the QR code again, restart the daemon:
-
-```bash
-launchctl unload  ~/Library/LaunchAgents/com.backbubbles.helper.plist
-launchctl load    ~/Library/LaunchAgents/com.backbubbles.helper.plist
-```
+After scanning the QR code the relay resumes automatically — no daemon restart needed.
 
 ---
 
 ## Troubleshooting
 
 ### "Conversation list did not appear — session may have expired"
-Re-run `python main.py --pair` to re-authenticate.
+Click **🔗 Pair Phone…** in the menu bar to re-authenticate.
 
 ### Messages show as "Not Delivered" on Mac
 This is expected if SMS relay is turned off in iMessage settings (which is
@@ -204,10 +223,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
 
-# Pair first (headed window):
-python main.py --pair
+# Pair first (opens headed browser via menu or CLI flag):
+python gui.py --pair
 
-# Then run normally (headless):
+# Run the GUI (menu bar app, headless after pairing):
+python gui.py
+
+# Run headless only (no menu bar icon):
 python main.py
 ```
 

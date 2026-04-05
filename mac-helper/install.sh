@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # BackBubbles Mac Helper — installer
 #
-# Creates a Python virtual-env, installs Playwright + Chromium, writes a
-# LaunchAgent plist so the helper auto-starts at login, and loads it.
+# Creates a Python virtual-env, installs Playwright + Chromium + rumps,
+# writes a LaunchAgent plist so the menu bar app auto-starts at login,
+# and loads it.
 #
 # Usage:
 #   bash install.sh
@@ -12,8 +13,8 @@
 #   BB_GMESSAGES_POLL_INTERVAL (default: 3.0)
 #   BB_POLL_INTERVAL           (default: 2.0)
 #
-# After installing, run the pairing step once to authenticate:
-#   source .venv/bin/activate && python main.py --pair
+# After installing, use the "Pair Phone…" item in the menu bar app, or run:
+#   source .venv/bin/activate && python gui.py --pair
 
 set -euo pipefail
 
@@ -39,7 +40,7 @@ echo "→ Creating Python virtual environment in ${VENV_DIR} …"
 python3 -m venv "${VENV_DIR}"
 "${VENV_DIR}/bin/pip" install --quiet --upgrade pip
 "${VENV_DIR}/bin/pip" install --quiet -r "${SCRIPT_DIR}/requirements.txt"
-echo "  ✓ Python dependencies installed."
+echo "  ✓ Python dependencies installed (playwright, rumps)."
 
 # ---------------------------------------------------------------------------
 # Playwright browser
@@ -59,7 +60,7 @@ mkdir -p "${LOG_DIR}"
 mkdir -p "${LAUNCH_AGENTS_DIR}"
 sed \
     -e "s|VENV_PYTHON_PLACEHOLDER|${VENV_DIR}/bin/python3|g" \
-    -e "s|MAIN_PY_PLACEHOLDER|${SCRIPT_DIR}/main.py|g" \
+    -e "s|GUI_PY_PLACEHOLDER|${SCRIPT_DIR}/gui.py|g" \
     -e "s|GMESSAGES_PROFILE_DIR_PLACEHOLDER|${PROFILE_DIR}|g" \
     -e "s|LOG_DIR_PLACEHOLDER|${LOG_DIR}|g" \
     "${PLIST_TEMPLATE}" > "${PLIST_DEST}"
@@ -84,15 +85,16 @@ echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  NEXT STEP: Pair your phone with Google Messages for Web     ║"
 echo "║                                                              ║"
-echo "║  Run the following command to open the pairing window:       ║"
+echo "║  A menu bar icon (💬) will appear when the app starts.      ║"
+echo "║  Click it and choose 'Pair Phone…' to scan the QR code,     ║"
+echo "║  or run the pairing manually:                                ║"
 echo "║                                                              ║"
 echo "║    cd ${SCRIPT_DIR}"
 echo "║    source .venv/bin/activate"
-echo "║    python main.py --pair                                     ║"
+echo "║    python gui.py --pair                                      ║"
 echo "║                                                              ║"
 echo "║  Scan the QR code in Google Messages on your Android phone.  ║"
-echo "║  After pairing, BackBubbles will restart automatically in    ║"
-echo "║  headless mode.                                              ║"
+echo "║  After pairing, the icon turns 💬 and the relay is active.  ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 echo "Logs: ${LOG_DIR}/backbubbles.log"
@@ -100,4 +102,5 @@ echo "      ${LOG_DIR}/backbubbles.error.log"
 echo ""
 echo "To stop:    launchctl unload ${PLIST_DEST}"
 echo "To restart: launchctl unload ${PLIST_DEST} && launchctl load ${PLIST_DEST}"
-echo "To re-pair: source ${VENV_DIR}/bin/activate && python ${SCRIPT_DIR}/main.py --pair"
+echo "To re-pair: click 'Pair Phone…' in the menu bar, or run:"
+echo "            source ${VENV_DIR}/bin/activate && python ${SCRIPT_DIR}/gui.py --pair"
