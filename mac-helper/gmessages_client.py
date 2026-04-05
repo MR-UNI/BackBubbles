@@ -244,13 +244,61 @@ class GMessagesClient:
         profile_dir = str(self._config.gmessages_profile_dir)
         headless = not self._pair_mode and self._config.gmessages_headless
 
+        # A realistic desktop user-agent avoids Google's "insecure browser"
+        # warning that it shows when it detects a headless/automation agent.
+        _USER_AGENT = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        )
+
         async with async_playwright() as pw:
             ctx: BrowserContext = await pw.chromium.launch_persistent_context(
                 user_data_dir=profile_dir,
                 headless=headless,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
+                user_agent=_USER_AGENT,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    # Suppress the automation-controlled banner and remove the
+                    # navigator.webdriver flag that Google inspects.
+                    "--disable-blink-features=AutomationControlled",
+                    # Exclude the --enable-automation switch that Playwright
+                    # adds by default (it triggers bot-detection).
+                    "--disable-features=AutomationControlled",
+                ],
+                ignore_default_args=["--enable-automation"],
                 viewport={"width": 1280, "height": 900},
             )
+            # Delete navigator.webdriver before any page script runs so that
+            # Google's sign-in page cannot detect the Playwright session.
+            await ctx.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined,
+                });
+                // Restore a plausible plugins list (empty in headless Chromium).
+                // Use named plugin objects that match a real Chrome installation.
+                const makePlugin = (name, desc, filename) => {
+                    const plugin = { name, description: desc, filename, length: 0 };
+                    Object.setPrototypeOf(plugin, Plugin.prototype);
+                    return plugin;
+                };
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => {
+                        const list = [
+                            makePlugin('Chrome PDF Plugin', 'Portable Document Format', 'internal-pdf-viewer'),
+                            makePlugin('Chrome PDF Viewer', '', 'mhjfbmdgcfjbbpaeojofohoefgiehjai'),
+                            makePlugin('Native Client', '', 'internal-nacl-plugin'),
+                        ];
+                        list.length = list.length;
+                        Object.setPrototypeOf(list, PluginArray.prototype);
+                        return list;
+                    },
+                });
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en'],
+                });
+            """)
             page: Page = ctx.pages[0] if ctx.pages else await ctx.new_page()
 
             # Pair if requested or if this is a fresh profile.
