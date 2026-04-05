@@ -1,11 +1,12 @@
 # BackBubbles
 
-> **Send SMS/RCS messages from your Mac using your Android phone's SIM card.**
+> **Send SMS/RCS messages from your Mac using your Android phone's SIM card — no Android app required.**
 
-BackBubbles is a relay bridge that watches macOS Messages.app for outgoing
-green-bubble (non-iMessage) messages and forwards them to your Android phone
-to be sent via its native SMS/RCS stack.  Incoming Android SMS/MMS messages
-are injected back into Messages.app so everything appears in one place.
+BackBubbles watches macOS Messages.app for outgoing green-bubble (non-iMessage)
+messages and sends them through **Google Messages for Web** running in a
+headless Chromium browser.  Incoming SMS/RCS messages are detected from the
+same session and injected back into Messages.app so everything appears in one
+place.
 
 ---
 
@@ -23,33 +24,32 @@ are injected back into Messages.app so everything appears in one place.
 │  db_injector.py ◄── delivery ───────┤            │
 │  (inject incoming / mark delivered) │            │
 │                                     ▼            │
-│                             bridge_client.py     │
-│                             (WebSocket client)   │
+│                             gmessages_client.py  │
+│                             (Playwright/Chromium) │
 └─────────────────────────────────────────────────┘
-                        │  WebSocket (LAN)
+                        │  HTTPS (internet)
                         ▼
-┌─────────────────────────────────────────────────┐
-│             Android (BackBubbles Bridge)          │
-│                                                  │
-│  BridgeService.kt  (WebSocket client)            │
-│      │                                           │
-│      ├──► SmsSender.kt  ──► SmsManager (send)   │
-│      │                          │                │
-│      │                          └── PendingIntent│
-│      │                              (sent/deliv) │
-│      ◄── SmsReceiver.kt (incoming SMS)           │
-└─────────────────────────────────────────────────┘
+              messages.google.com/web
+                        │
+                        │  Google's servers
+                        ▼
+              Your Android phone's
+              SMS / RCS stack
 ```
 
-### Message protocol
+### How it works
 
-All messages are JSON frames over a WebSocket connection.
+1. The Mac helper polls `~/Library/Messages/chat.db` for new outgoing
+   green-bubble messages.
+2. Each message is typed into a headless Chromium browser session running
+   **Google Messages for Web** (`messages.google.com/web`).
+3. Google's servers relay the message to your paired Android phone, which
+   sends it via its native SMS/RCS stack.
+4. The Mac helper polls the same GMWeb session for delivery confirmations
+   and incoming messages, updating `chat.db` so Messages.app reflects them.
 
-| Direction | Type | Fields |
-|-----------|------|--------|
-| Mac → Android | `send_sms` | `message_id`, `to`, `body`, `service` |
-| Android → Mac | `delivery_status` | `message_id`, `status` (`sent`/`delivered`/`read`/`failed`), `error_code` (on failure) |
-| Android → Mac | `incoming_sms` | `from`, `body`, `service`, `timestamp` |
+**Your phone does not need to be on the same Wi-Fi network** — it only needs
+an internet connection (cellular or Wi-Fi).
 
 ---
 
@@ -63,92 +63,117 @@ All messages are JSON frames over a WebSocket connection.
   → *System Settings → Privacy & Security → Full Disk Access*
 
 ### Android side
-- Android 8.0 (API 26) or later
-- The Android device and Mac **must be on the same local network** (Wi-Fi)
-- The Android device is set as the **default SMS app** (or at minimum has
-  `SEND_SMS` and `RECEIVE_SMS` permissions granted)
+- An Android phone with **Google Messages** installed as the default SMS app
+- The phone must be signed into a Google account and have internet access
+
+> **No Android app to install.** BackBubbles uses the same pairing mechanism
+> as the official Google Messages for Web feature already built into
+> Google Messages.
 
 ---
 
 ## Setup
 
-### 1 — Android Bridge app
-
-1. Clone this repo and open the `android/` folder in **Android Studio**.
-2. Build and install the app on your Android device:
-   ```bash
-   cd android
-   ./gradlew installDebug
-   ```
-3. Open the **BackBubbles** app on your Android device.
-4. Grant all requested permissions (SMS, notifications).
-5. Note the **Device IP** shown on the main screen (e.g. `192.168.1.42`).
-6. Tap **Start Bridge** — the service will wait for the Mac helper to connect.
-
-> **First-time setup:** Go to *Settings → Apps → BackBubbles → Set as default*
-> if you want BackBubbles to be the SMS handler, or grant SMS permissions
-> manually in App Info.
-
-### 2 — Mac Helper daemon
+### 1 — Install the Mac Helper
 
 ```bash
 cd mac-helper
-BB_ANDROID_HOST=192.168.1.42 bash install.sh
+bash install.sh
 ```
 
 This will:
 - Create a Python virtual environment in `mac-helper/.venv`
-- Install dependencies (`websockets`)
+- Install Playwright and download Chromium
 - Write a **LaunchAgent** plist to `~/Library/LaunchAgents/com.backbubbles.helper.plist`
 - Load the agent so it starts automatically at login
 
-**Optional environment variables:**
+**Optional environment variables for `install.sh`:**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BB_ANDROID_HOST` | *(required)* | IP address of your Android device |
-| `BB_ANDROID_PORT` | `8765` | WebSocket port |
+| `BB_GMESSAGES_PROFILE_DIR` | `~/.backbubbles/gmessages-profile` | Where the Chromium session is persisted |
+| `BB_GMESSAGES_POLL_INTERVAL` | `3.0` | Seconds between inbox scans |
 | `BB_POLL_INTERVAL` | `2.0` | Seconds between chat.db polls |
-| `BB_RECONNECT_DELAY` | `5.0` | Seconds before reconnecting |
+
+### 2 — Pair your phone (first-time setup)
+
+```bash
+cd mac-helper
+source .venv/bin/activate
+python main.py --pair
+```
+
+A **Chromium window** will open and navigate to the Google Messages for Web
+authentication page.  On your Android phone:
+
+1. Open **Google Messages**.
+2. Tap the three-dot menu → **Device pairing** (or **Messages for web**).
+3. Tap **QR code scanner** and scan the code on screen.
+
+Once paired, the Chromium window closes automatically and the session is
+saved to `~/.backbubbles/gmessages-profile/`.  All future runs use this
+saved session in **headless** (invisible) mode.
 
 ### 3 — Send a test message
 
 1. Open **Messages.app** on your Mac.
 2. Start a new conversation with a non-iMessage contact (green bubble).
 3. Type a message and press **Return**.
-4. BackBubbles will detect the outgoing row in `chat.db`, forward it to your
-   Android phone, and the Android will send the SMS via `SmsManager`.
-5. When Android confirms delivery, the Mac helper updates `chat.db` to mark
-   the message as delivered (no red "not delivered" indicator).
+4. BackBubbles detects the outgoing row in `chat.db`, types the message into
+   GMWeb, and your Android phone sends it via SMS/RCS.
+5. When delivery is confirmed, the Mac helper updates `chat.db` to mark the
+   message as delivered.
 
 ### 4 — Incoming messages
 
-When your Android phone receives an SMS, `SmsReceiver` forwards it to
-`BridgeService`, which sends it to the Mac helper, which inserts a new row
-into `chat.db`.  Messages.app will display it as an incoming message from
-that contact.
+When your Android phone receives an SMS or RCS message, it appears in
+`messages.google.com/web`.  BackBubbles polls for new incoming bubbles and
+inserts them into `chat.db` so Messages.app displays them as incoming
+messages from that contact.
+
+---
+
+## Reconnecting / re-pairing
+
+Google Messages for Web sessions can expire if:
+- You sign into GMWeb in another browser (only one session is allowed)
+- You sign out of Google on your phone
+- The session cookie expires after a long period of inactivity
+
+To re-pair:
+
+```bash
+cd mac-helper
+source .venv/bin/activate
+python main.py --pair
+```
+
+After scanning the QR code again, restart the daemon:
+
+```bash
+launchctl unload  ~/Library/LaunchAgents/com.backbubbles.helper.plist
+launchctl load    ~/Library/LaunchAgents/com.backbubbles.helper.plist
+```
 
 ---
 
 ## Troubleshooting
 
-### "Configuration error: android_host is not set"
-Export `BB_ANDROID_HOST` before running, or re-run `install.sh` with the
-variable set.
+### "Conversation list did not appear — session may have expired"
+Re-run `python main.py --pair` to re-authenticate.
 
 ### Messages show as "Not Delivered" on Mac
 This is expected if SMS relay is turned off in iMessage settings (which is
 recommended so Apple doesn't also try to send via a relay iPhone).
-BackBubbles will still mark them as delivered once the Android confirms.
+BackBubbles will still mark them as delivered once GMWeb confirms.
 
 ### Mac helper can't read chat.db
 Grant **Full Disk Access** to Terminal (or the Python binary) in
 *System Settings → Privacy & Security → Full Disk Access*.
 
-### Android Bridge not receiving connections
-- Make sure both devices are on the same Wi-Fi network.
-- Check that the port (`8765` by default) is not blocked by a firewall.
-- Verify the IP address shown in the BackBubbles app matches `BB_ANDROID_HOST`.
+### High memory usage
+The headless Chromium browser uses approximately 200 MB of RAM.  This is
+normal for a background browser session.
 
 ---
 
@@ -177,7 +202,13 @@ cd mac-helper
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-BB_ANDROID_HOST=192.168.1.42 python main.py
+playwright install chromium
+
+# Pair first (headed window):
+python main.py --pair
+
+# Then run normally (headless):
+python main.py
 ```
 
 ### Run Mac helper tests
@@ -188,26 +219,37 @@ python3 -m pytest tests/ -v
 python3 -m unittest tests/test_mac_helper.py -v
 ```
 
-### Build Android app
-```bash
-cd android
-./gradlew assembleDebug
-```
+---
+
+## Android fallback (deprecated)
+
+The `android/` directory contains the original Android WebSocket bridge app.
+It is **no longer required** and is kept only as a historical reference.
+Using the GMWeb approach (this README) is strongly recommended.
 
 ---
 
 ## Caveats & Known Limitations
 
-- **No end-to-end encryption** — messages travel in plain-text JSON over your
-  local network.  Do not expose the WebSocket port to the internet.
+- **Google can change the GMWeb DOM** at any time, which may break the
+  Playwright selectors in `gmessages_client.py`.  The selectors target
+  Angular component element names and `aria-label` attributes, which tend to
+  be more stable than class names.  Update the `_SEL_*` constants at the top
+  of `gmessages_client.py` if Google changes the UI.
 - **chat.db schema may change** with future macOS updates, breaking the
   injector.  Always back up your Messages database before enabling write-back.
 - **iMessage messages** are handled entirely by Apple and are never touched by
   BackBubbles.
-- **RCS** requires that Google Messages is the default SMS app on Android and
-  that the recipient also supports RCS.  From macOS Messages.app, RCS messages
-  appear as green bubbles just like SMS.
-- **Delivery receipts** depend on carrier support for SMS delivery reports.
+- **RCS** works automatically when both parties support it — no extra
+  configuration required.  GMWeb sends RCS by default when available and
+  falls back to SMS otherwise.
+- **One active GMWeb session** — Google only allows one paired web session at
+  a time.  Opening `messages.google.com` in Chrome while BackBubbles is
+  running will disconnect the BackBubbles session.
+- **Incoming message cursor resets on restart** — on the first poll after
+  the daemon restarts, recently received messages may be re-reported to
+  `chat.db`.  Duplicate rows are generally harmless (Messages.app deduplicates
+  by phone number and timestamp).
 
 ---
 

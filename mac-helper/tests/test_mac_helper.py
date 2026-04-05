@@ -117,32 +117,33 @@ def _add_handle(db_path: Path, address: str, service: str = "SMS") -> int:
 class TestConfig(unittest.TestCase):
     def test_defaults(self):
         cfg = Config()
-        self.assertEqual(cfg.android_port, 8765)
         self.assertAlmostEqual(cfg.poll_interval, 2.0)
+        self.assertAlmostEqual(cfg.gmessages_poll_interval, 3.0)
+        self.assertTrue(cfg.gmessages_headless)
         self.assertIn("SMS", cfg.sms_services)
 
-    def test_validate_raises_when_host_missing(self):
-        cfg = Config(android_host="")
-        with self.assertRaises(ValueError):
-            cfg.validate()
+    def test_gmessages_profile_dir_default(self):
+        cfg = Config()
+        self.assertIn(".backbubbles", str(cfg.gmessages_profile_dir))
+        self.assertIn("gmessages-profile", str(cfg.gmessages_profile_dir))
 
-    def test_validate_passes_with_host(self):
-        cfg = Config(android_host="192.168.1.42")
+    def test_validate_passes_with_defaults(self):
+        cfg = Config()
         cfg.validate()  # should not raise
 
-    def test_ws_uri(self):
-        cfg = Config(android_host="10.0.0.5", android_port=9000)
-        self.assertEqual(cfg.ws_uri, "ws://10.0.0.5:9000")
-
-    def test_validate_bad_port(self):
-        cfg = Config(android_host="1.2.3.4", android_port=0)
-        with self.assertRaises(ValueError):
-            cfg.validate()
-
     def test_validate_bad_poll_interval(self):
-        cfg = Config(android_host="1.2.3.4", poll_interval=-1.0)
+        cfg = Config(poll_interval=-1.0)
         with self.assertRaises(ValueError):
             cfg.validate()
+
+    def test_validate_bad_gmessages_poll_interval(self):
+        cfg = Config(gmessages_poll_interval=0.0)
+        with self.assertRaises(ValueError):
+            cfg.validate()
+
+    def test_gmessages_headless_flag(self):
+        cfg = Config(gmessages_headless=False)
+        self.assertFalse(cfg.gmessages_headless)
 
 
 # ===========================================================================
@@ -172,7 +173,6 @@ class TestChatDBWatcher(unittest.TestCase):
         self.db_path = _create_temp_db()
         self.handle_id = _add_handle(self.db_path, "+12025551234")
         self.config = Config(
-            android_host="127.0.0.1",
             chat_db_path=self.db_path,
             sms_services=["SMS", "MMS"],
         )

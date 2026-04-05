@@ -3,32 +3,35 @@ BackBubbles Mac Helper — main entry point.
 
 Orchestrates:
   1. Watching ~/Library/Messages/chat.db for outgoing non-iMessage messages.
-  2. Forwarding those messages to the Android BackBubbles Bridge app.
-  3. Receiving delivery status updates from Android and updating chat.db.
-  4. Receiving incoming SMS/RCS from Android and injecting them into chat.db.
+  2. Forwarding those messages to Google Messages for Web via Playwright.
+  3. Receiving delivery status updates from GMWeb and updating chat.db.
+  4. Receiving incoming SMS/RCS from GMWeb and injecting them into chat.db.
 
 Usage
 -----
+    # Normal operation (headless, uses persisted session):
     python main.py
 
-Required environment variable:
-    BB_ANDROID_HOST   — IP address of your Android device (e.g. 192.168.1.42)
+    # First-time setup or re-pairing (opens headed browser for QR scan):
+    python main.py --pair
 
 Optional environment variables (see config.py for defaults):
-    BB_ANDROID_PORT   — WebSocket port (default: 8765)
-    BB_POLL_INTERVAL  — Seconds between chat.db polls (default: 2.0)
-    BB_RECONNECT_DELAY — Seconds before reconnecting (default: 5.0)
+    BB_GMESSAGES_PROFILE_DIR   — path to the Chromium profile directory
+    BB_GMESSAGES_HEADLESS      — '0' to force headed mode
+    BB_GMESSAGES_POLL_INTERVAL — seconds between inbox scans (default: 3.0)
+    BB_POLL_INTERVAL           — seconds between chat.db polls (default: 2.0)
 """
 
 from __future__ import annotations
 
+import argparse
 import logging
 import signal
 import sys
 import threading
 
 from config import Config
-from bridge_client import BridgeClient
+from gmessages_client import GMessagesClient
 from chat_db_watcher import ChatDBWatcher, OutgoingMessage
 from db_injector import ChatDBInjector
 
@@ -49,10 +52,14 @@ log = logging.getLogger("backbubbles")
 
 
 class BackBubbles:
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, pair_mode: bool = False) -> None:
         self._config = config
         self._injector = ChatDBInjector(config.chat_db_path)
-        self._bridge = BridgeClient(config, on_incoming=self._handle_android_message)
+        self._bridge = GMessagesClient(
+            config,
+            on_incoming=self._handle_android_message,
+            pair_mode=pair_mode,
+        )
         self._watcher = ChatDBWatcher(config)
         self._stop_event = threading.Event()
 
@@ -65,7 +72,7 @@ class BackBubbles:
         self._config.validate()
 
         self._bridge.start()
-        log.info("Bridge client started.")
+        log.info("Google Messages for Web client started.")
 
         try:
             self._watcher.run_forever(
@@ -81,7 +88,7 @@ class BackBubbles:
         self._stop_event.set()
 
     # ------------------------------------------------------------------
-    # Outgoing message (Mac → Android)
+    # Outgoing message (Mac → GMWeb)
     # ------------------------------------------------------------------
 
     def _handle_outgoing_message(self, msg: OutgoingMessage) -> None:
@@ -100,11 +107,11 @@ class BackBubbles:
         )
 
     # ------------------------------------------------------------------
-    # Incoming message from Android
+    # Incoming message from GMWeb
     # ------------------------------------------------------------------
 
     def _handle_android_message(self, data: dict) -> None:
-        """Dispatch messages arriving from the Android bridge."""
+        """Dispatch events arriving from the GMWeb client."""
         msg_type = data.get("type")
 
         if msg_type == "delivery_status":
@@ -114,7 +121,7 @@ class BackBubbles:
             self._on_incoming_sms(data)
 
         else:
-            log.warning("Unknown message type from bridge: %r", msg_type)
+            log.warning("Unknown message type from GMWeb client: %r", msg_type)
 
     def _on_delivery_status(self, data: dict) -> None:
         guid = data.get("message_id", "")
@@ -152,10 +159,28 @@ class BackBubbles:
 # ---------------------------------------------------------------------------
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="BackBubbles Mac Helper — SMS relay via Google Messages for Web"
+    )
+    parser.add_argument(
+        "--pair",
+        action="store_true",
+        help=(
+            "Open a headed browser window and prompt the user to scan the "
+            "Google Messages QR code.  Use this on first run or whenever the "
+            "session expires.  After pairing, restart without --pair for "
+            "normal headless operation."
+        ),
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = _parse_args()
     config = Config()
 
-    app = BackBubbles(config)
+    app = BackBubbles(config, pair_mode=args.pair)
 
     def _signal_handler(sig, frame):
         app.stop()
@@ -175,3 +200,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

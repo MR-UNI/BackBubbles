@@ -17,14 +17,14 @@
     <!-- Environment variables read by config.py. -->
     <key>EnvironmentVariables</key>
     <dict>
-        <key>BB_ANDROID_HOST</key>
-        <string>ANDROID_HOST_PLACEHOLDER</string>
-        <key>BB_ANDROID_PORT</key>
-        <string>8765</string>
+        <key>BB_GMESSAGES_PROFILE_DIR</key>
+        <string>GMESSAGES_PROFILE_DIR_PLACEHOLDER</string>
+        <key>BB_GMESSAGES_HEADLESS</key>
+        <string>1</string>
+        <key>BB_GMESSAGES_POLL_INTERVAL</key>
+        <string>3.0</string>
         <key>BB_POLL_INTERVAL</key>
         <string>2.0</string>
-        <key>BB_RECONNECT_DELAY</key>
-        <string>5.0</string>
     </dict>
 
     <!-- Start at login and restart if it crashes. -->
